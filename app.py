@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 import requests
 
 # Set up page config
-st.set_page_config(page_title="TerraClimate Advanced Analytics", layout="wide", page_icon="🌎")
+st.set_page_config(page_title="TerraClimate Regional Explorer", layout="wide", page_icon="🌎")
 
 # Helper to add GEE layer to Folium
 def add_ee_layer(self, ee_object, vis_params, name):
@@ -51,7 +51,7 @@ def get_districts(country, state):
     ))
     return sorted(filtered.aggregate_array('ADM2_NAME').distinct().getInfo())
 
-st.title("🌏 TerraClimate: Advanced Regional Dashboard")
+st.title("🌏 TerraClimate: OpenStream Dashboard")
 
 # --- SIDEBAR: ONLY AUTHENTICATION ---
 with st.sidebar:
@@ -84,14 +84,12 @@ with st.sidebar:
 
 # --- MAIN PANEL: CLIMATE ANALYSIS ---
 if st.session_state.get("ee_initialized"):
-    # 1. Selection Level & Dynamic Admin Selection
+    # 1. Selection AOI
     with st.expander("🗾 Area of Interest Selection", expanded=True):
         level = st.radio("Selection Level", ["Country", "State/Province", "District"], horizontal=True)
-        
         try:
             countries = get_countries()
             c1, c2, c3 = st.columns(3)
-            
             with c1:
                 selected_country = st.selectbox("Select Country", countries, index=countries.index("India") if "India" in countries else 0)
             with c2:
@@ -104,8 +102,7 @@ if st.session_state.get("ee_initialized"):
                     districts = get_districts(selected_country, selected_state)
                     selected_district = st.selectbox("District", districts)
                 else: selected_district = None
-        except Exception:
-            st.stop()
+        except Exception: st.stop()
 
     # 2. Climate Filters
     with st.container():
@@ -147,8 +144,6 @@ if st.session_state.get("ee_initialized"):
         # Load Climate Data
         dataset = ee.ImageCollection('IDAHO_EPSCOR/TERRACLIMATE') \
             .filterDate(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
-        
-        # Processing & Statistics
         mean_img = dataset.select(selected_var).mean().clip(roi)
         
         if auto_stretch:
@@ -159,84 +154,66 @@ if st.session_state.get("ee_initialized"):
         
         vis_params = {'min': v_min, 'max': v_max, 'palette': current_palette}
 
-        # --- TABS ---
-        tab_map, tab_chart, tab_export = st.tabs(["🗺️ Explorer", "📈 Advanced Time Series", "📥 Export JPG"])
-        
-        with tab_map:
-            try:
-                centroid = roi.geometry().centroid(1000).getInfo()
-                center = centroid['coordinates'][::-1] if centroid and 'coordinates' in centroid else [20, 0]
-                m = folium.Map(location=center, zoom_start=6 if level == 'Country' else 9)
-            except Exception: m = folium.Map(location=[20, 0], zoom_start=2)
+        # --- SECTION 1: MAP VIEWER ---
+        st.subheader("🗺️ Interactive Map Viewer")
+        try:
+            centroid = roi.geometry().centroid(1000).getInfo()
+            center = centroid['coordinates'][::-1] if centroid and 'coordinates' in centroid else [20, 0]
+            m = folium.Map(location=center, zoom_start=6 if level == 'Country' else 9)
+        except Exception: m = folium.Map(location=[20, 0], zoom_start=2)
+            
+        m.add_ee_layer(mean_img, vis_params, f"{variables[selected_var]} Mean")
+        folium.GeoJson(data=roi.geometry().getInfo(), style_function=lambda x: {'fillColor': 'none', 'color': 'red', 'weight': 2}).add_to(m)
+        folium.LayerControl().add_to(m)
+        st_folium(m, width="100%", height=600)
+
+        # --- SECTION 2: TIMESERIES ANALYSIS ---
+        st.markdown("---")
+        st.subheader(f"📈 Advanced Temporal Trend in {selected_district or selected_state or selected_country}")
+        t_c1, t_c2, t_c3 = st.columns(3)
+        chart_type = t_c1.selectbox("Chart Style", ["Line Chart", "Area Chart", "Bar Chart"])
+        moving_avg = t_c2.slider("Smoothing (MA Months)", 1, 12, 1)
+        show_trend = t_c3.checkbox("Show Linear Trendline", value=True)
+
+        if st.button("📊 Process Time Series & Chart"):
+            with st.spinner("Crunching temporal data..."):
+                def extract_info(image):
+                    millis = image.date().millis()
+                    value = image.reduceRegion(ee.Reducer.mean(), roi, 10000).get(selected_var)
+                    return ee.Feature(None, {'millis': millis, 'value': value})
                 
-            m.add_ee_layer(mean_img, vis_params, f"{variables[selected_var]} Mean")
-            folium.GeoJson(data=roi.geometry().getInfo(), style_function=lambda x: {'fillColor': 'none', 'color': 'red', 'weight': 2}).add_to(m)
-            folium.LayerControl().add_to(m)
-            st_folium(m, width="100%", height=600)
-            
-        with tab_chart:
-            st.subheader(f"📈 Advanced Analytics - {variables[selected_var]}")
-            
-            # CHART OPTIONS
-            opt_c1, opt_c2, opt_c3 = st.columns(3)
-            chart_type = opt_c1.selectbox("Chart Style", ["Line Chart", "Area Chart", "Bar Chart"])
-            moving_avg = opt_c2.slider("Smoothing (MA Months)", 1, 12, 1)
-            show_trend = opt_c3.checkbox("Show Trendline (Linear)", value=True)
+                data_features = dataset.select(selected_var).map(extract_info).getInfo()['features']
+                df = pd.DataFrame([f['properties'] for f in data_features])
+                
+                if not df.empty:
+                    df['date'] = pd.to_datetime(df['millis'], unit='ms')
+                    df = df.set_index('date').sort_index().dropna(subset=['value'])
+                    if moving_avg > 1: df['Smoothed'] = df['value'].rolling(window=moving_avg, center=True).mean()
+                    if show_trend and len(df) > 1:
+                        x = np.arange(len(df)); y = df['value'].values; coeffs = np.polyfit(x, y, 1); poly = np.poly1d(coeffs)
+                        df['Trendline'] = poly(x)
 
-            if st.button("📊 Process Time Series & Chart"):
-                with st.spinner("Crunching temporal data..."):
-                    def extract_info(image):
-                        millis = image.date().millis()
-                        value = image.reduceRegion(ee.Reducer.mean(), roi, 10000).get(selected_var)
-                        return ee.Feature(None, {'millis': millis, 'value': value})
-                    
-                    data_features = dataset.select(selected_var).map(extract_info).getInfo()['features']
-                    df = pd.DataFrame([f['properties'] for f in data_features])
-                    
-                    if not df.empty:
-                        df['date'] = pd.to_datetime(df['millis'], unit='ms')
-                        df = df.set_index('date').sort_index().dropna(subset=['value'])
-                        
-                        # --- ADVANCED ANALYSIS ---
-                        # 1. Moving Average
-                        if moving_avg > 1:
-                            df['Smoothed'] = df['value'].rolling(window=moving_avg, center=True).mean()
-                        
-                        # 2. Trendline (Linear Regression)
-                        if show_trend and len(df) > 1:
-                            x = np.arange(len(df))
-                            y = df['value'].values
-                            coeffs = np.polyfit(x, y, 1)
-                            poly = np.poly1d(coeffs)
-                            df['Trendline'] = poly(x)
+                    if chart_type == "Line Chart": st.line_chart(df[['value', 'Smoothed', 'Trendline']] if 'Smoothed' in df else df[['value', 'Trendline']] if 'Trendline' in df else df['value'])
+                    elif chart_type == "Area Chart": st.area_chart(df[['value']])
+                    else: st.bar_chart(df['value'])
 
-                        # --- PLOTTING ---
-                        st.markdown(f"**Spatial Status:** Analyzing entire `{selected_district or selected_state or selected_country}`")
-                        
-                        if chart_type == "Line Chart": st.line_chart(df[['value', 'Smoothed', 'Trendline']] if 'Smoothed' in df else df[['value', 'Trendline']] if 'Trendline' in df else df['value'])
-                        elif chart_type == "Area Chart": st.area_chart(df[['value']])
-                        else: st.bar_chart(df['value'])
+                    csv = df.to_csv().encode('utf-8')
+                    st.download_button(label="📥 Download CSV", data=csv, file_name=f'timeseries_{selected_var}.csv', mime='text/csv')
+                    st.dataframe(df)
 
-                        # CSV DOWNLOAD
-                        csv = df.to_csv().encode('utf-8')
-                        st.download_button(
-                            label="📥 Download Data as CSV",
-                            data=csv,
-                            file_name=f'terraclimate_{selected_var}_{selected_country}.csv',
-                            mime='text/csv',
-                        )
-                        st.dataframe(df)
-                    else:
-                        st.warning("No data found for this selection.")
-
-        with tab_export:
-            st.subheader("Region Map Download")
-            thumb_url = mean_img.getThumbURL({'min': v_min, 'max': v_max, 'palette': current_palette, 'dimensions': 1024, 'region': roi.geometry().bounds().getInfo(), 'format': 'jpg'})
-            st.image(thumb_url, use_column_width=True)
-            st.markdown(f"📥 [Click here to download JPG]({thumb_url})")
+        # --- SECTION 3: EXPORT ---
+        st.markdown("---")
+        st.subheader("📥 Export Final Map Region")
+        exp_c1, exp_c2 = st.columns([2, 1])
+        thumb_url = mean_img.getThumbURL({'min': v_min, 'max': v_max, 'palette': current_palette, 'dimensions': 1024, 'region': roi.geometry().bounds().getInfo(), 'format': 'jpg'})
+        exp_c1.image(thumb_url, caption=f"JPG Map Result for {selected_district or selected_country}", use_column_width=True)
+        exp_c2.markdown("### 💾 Map File Details")
+        exp_c2.write(f"**Variable:** {variables[selected_var]}")
+        exp_c2.write(f"**Region:** {selected_district or selected_state or selected_country}")
+        exp_c2.markdown(f"📥 [**Download High-Res JPG**]({thumb_url})")
 
     except Exception as e:
         st.error(f"Error: {e}")
 
 else:
-    st.info("👋 Select Auth in sidebar to begin.")
+    st.info("👋 Setup your Google Earth Engine connection in the sidebar.")
