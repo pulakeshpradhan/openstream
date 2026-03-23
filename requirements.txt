@@ -1,0 +1,9 @@
+streamlit
+earthengine-api
+folium
+streamlit-folium
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
+pandas
+streamlit-oauth
