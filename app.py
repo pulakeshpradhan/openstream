@@ -8,35 +8,6 @@ import json
 # Set up page config
 st.set_page_config(page_title="Earth Engine Viewer (Native)", layout="wide")
 
-# 1. Define Placeholders/Constants
-# These should ideally come from st.secrets in local dev or Streamlit Cloud
-PROJECT_ID = st.secrets.get("gee", {}).get("project_id", "YOUR_PROJECT_ID_HERE")
-
-def initialize_ee():
-    """Initializes Earth Engine using service account or ADC."""
-    if "ee_initialized" not in st.session_state:
-        try:
-            # Check if Service Account credentials are provided in st.secrets
-            if "gcp_service_account" in st.secrets:
-                sa_info = dict(st.secrets["gcp_service_account"])
-                # Handle potential key formatting issues in secrets
-                if "\\n" in sa_info["private_key"]:
-                    sa_info["private_key"] = sa_info["private_key"].replace("\\n", "\n")
-                
-                creds = service_account.Credentials.from_service_account_info(sa_info)
-                ee.Initialize(creds, project=PROJECT_ID)
-            else:
-                # Fallback to Application Default Credentials (ADC)
-                # Useful for local dev if 'gcloud auth application-default login' was run
-                ee.Initialize(project=PROJECT_ID)
-            
-            st.session_state["ee_initialized"] = True
-            return True
-        except Exception as e:
-            st.error(f"Earth Engine Initialization Failed: {e}")
-            return False
-    return True
-
 # Helper to add EE layer to folium
 def add_ee_layer(self, ee_object, vis_params, name):
     """Function to add GEE data as a folium layer."""
@@ -56,10 +27,72 @@ folium.Map.add_ee_layer = add_ee_layer
 st.title("🌍 Google Earth Engine (Direct API)")
 st.markdown("### Simple Viewer (No `geemap`)")
 
-if initialize_ee():
-    st.success(f"Connected to Earth Engine Project: `{PROJECT_ID}`")
+# Input for Project ID and Service Account if not in secrets
+with st.sidebar:
+    st.header("🔑 Authentication Setup")
     
-    # Sidebar for controls
+    # Try to get defaults from secrets
+    default_project = st.secrets.get("gee", {}).get("project_id", "")
+    
+    project_id = st.text_input("Enter Google Cloud Project ID", value=st.session_state.get("project_id", default_project))
+    
+    st.markdown("---")
+    st.subheader("Service Account JSON (Optional)")
+    st.caption("Paste your service account JSON content here if not using local ADC.")
+    sa_json_text = st.area_text_input("Service Account JSON", value=st.session_state.get("sa_json", ""), height=200)
+
+    if st.button("Apply & Initialize"):
+        st.session_state["project_id"] = project_id
+        st.session_state["sa_json"] = sa_json_text
+        
+        # Reset initialization state to force retry
+        if "ee_initialized" in st.session_state:
+            del st.session_state["ee_initialized"]
+        st.rerun()
+
+# Use provided credentials or secrets
+def initialize_ee_v2():
+    """Initializes Earth Engine using provided inputs or secrets."""
+    current_project = st.session_state.get("project_id") or st.secrets.get("gee", {}).get("project_id")
+    
+    if not current_project or current_project == "YOUR_PROJECT_ID_HERE":
+        st.info("👋 Welcome! Please enter your **Project ID** in the sidebar to begin.")
+        return False
+
+    if "ee_initialized" not in st.session_state:
+        try:
+            # 1. Try provided JSON Text Input
+            if st.session_state.get("sa_json"):
+                sa_info = json.loads(st.session_state["sa_json"])
+                creds = service_account.Credentials.from_service_account_info(sa_info)
+                ee.Initialize(creds, project=current_project)
+            
+            # 2. Try Secrets.toml Service Account
+            elif "gcp_service_account" in st.secrets:
+                sa_info = dict(st.secrets["gcp_service_account"])
+                if "\\n" in sa_info["private_key"]:
+                    sa_info["private_key"] = sa_info["private_key"].replace("\\n", "\n")
+                creds = service_account.Credentials.from_service_account_info(sa_info)
+                ee.Initialize(creds, project=current_project)
+            
+            # 3. Try ADC (Local Environment)
+            else:
+                ee.Initialize(project=current_project)
+            
+            st.session_state["ee_initialized"] = True
+            st.session_state["current_project"] = current_project
+            return True
+        except Exception as e:
+            st.error(f"Earth Engine Initialization Failed: {e}")
+            st.info("💡 Ensure the Earth Engine API is enabled and your credentials are correct.")
+            return False
+    return True
+
+if initialize_ee_v2():
+    st.success(f"Connected to Earth Engine Project: `{st.session_state.get('current_project')}`")
+    
+    # Sidebar for map controls
+    st.sidebar.markdown("---")
     st.sidebar.header("Map Controls")
     year = st.sidebar.slider("Select Year (Landsat 8 Top of Atmosphere)", 2013, 2023, 2023)
     
@@ -92,14 +125,3 @@ if initialize_ee():
         
     except Exception as e:
         st.error(f"Error loading GEE layer: {e}")
-
-else:
-    st.warning("Please configure your credentials in `.streamlit/secrets.toml` or via Environment Variables.")
-    st.code("""
-[gee]
-project_id = "your-project-id"
-
-[gcp_service_account]
-type = "service_account"
-... (Full JSON contents)
-    """, language="toml")
