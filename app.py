@@ -118,6 +118,16 @@ if st.session_state.get("ee_initialized"):
         }
         selected_var = f3.selectbox("Select Variable", options=list(variables.keys()), format_func=lambda x: variables[x])
 
+    # 3. Palette Customization
+    with st.expander("🎨 Palette & Visualization Settings"):
+        cp1, cp2, cp3 = st.columns([2, 1, 1])
+        default_p = "1a3678, 2955bc, 5699ff, 8dbae9, acd1ff, caebff, e5f9ff, fdffb4, ffe6a2, ffc969, ffa12d, ff7c1f, ca531a, ff0000, ab0000"
+        palette_input = cp1.text_input("Hex Colors (comma separated)", value=default_p)
+        v_min = cp2.number_input("Min Value", value=-300.0 if selected_var in ['tmmx', 'tmmn'] else 0.0)
+        v_max = cp3.number_input("Max Value", value=300.0 if selected_var in ['tmmx', 'tmmn'] else 500.0)
+        
+        current_palette = [c.strip() for c in palette_input.split(",")]
+
     st.markdown("---")
 
     try:
@@ -133,16 +143,12 @@ if st.session_state.get("ee_initialized"):
         dataset = ee.ImageCollection('IDAHO_EPSCOR/TERRACLIMATE') \
             .filterDate(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
         
-        # User palette
-        user_palette = ['1a3678', '2955bc', '5699ff', '8dbae9', 'acd1ff', 'caebff', 'e5f9ff', 'fdffb4', 'ffe6a2', 'ffc969', 'ffa12d', 'ff7c1f', 'ca531a', 'ff0000', 'ab0000']
-        
         # Processing
         mean_img = dataset.select(selected_var).mean().clip(roi)
         
-        if selected_var in ['tmmx', 'tmmn']:
-            vis_params = {'min': -300.0, 'max': 300.0, 'palette': user_palette}
-        else:
-            vis_params = {'min': 0, 'max': 500, 'palette': ['white', 'blue']}
+        # Apply Custom Palette
+        vis_params = {'min': v_min, 'max': v_max, 'palette': current_palette}
+        st.info(f"Visualizing `{variables[selected_var]}` with range [{v_min}, {v_max}]")
 
         # --- TABS ---
         tab_map, tab_chart, tab_export = st.tabs(["🗺️ Map Viewer", "📈 Trend Analysis", "💾 Export Map"])
