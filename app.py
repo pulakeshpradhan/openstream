@@ -50,6 +50,9 @@ with st.sidebar:
                                 height=250,
                                 placeholder='{"type": "service_account", ...}')
 
+    # Added: Link to get the key
+    st.markdown("🔗 [Get your Service Account Key](https://console.cloud.google.com/iam-admin/serviceaccounts)")
+
     # 3. Authenticate Button
     if st.button("🚀 Authenticate & Initialize"):
         if not project_id:
