@@ -177,9 +177,14 @@ if st.session_state.get("ee_initialized"):
         
         with tab_map:
             try:
-                center = roi.geometry().centroid(1000).getInfo()['coordinates'][::-1]
-                m = folium.Map(location=center, zoom_start=6 if level == 'Country' else 9)
-            except:
+                # Robust Centering Logic
+                centroid_info = roi.geometry().centroid(1000).getInfo()
+                if centroid_info and 'coordinates' in centroid_info:
+                    center = centroid_info['coordinates'][::-1]
+                    m = folium.Map(location=center, zoom_start=6 if level == 'Country' else 9)
+                else:
+                    m = folium.Map(location=[20, 0], zoom_start=2)
+            except Exception:
                 m = folium.Map(location=[20, 0], zoom_start=2)
                 
             m.add_ee_layer(mean_img, vis_params, "Regional Data")
