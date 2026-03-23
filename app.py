@@ -120,11 +120,17 @@ if st.session_state.get("ee_initialized"):
 
     # 3. Palette Customization
     with st.expander("🎨 Palette & Visualization Settings"):
-        cp1, cp2, cp3 = st.columns([2, 1, 1])
+        cp1, cp2, cp3, cp4 = st.columns([2, 1, 1, 1])
         default_p = "1a3678, 2955bc, 5699ff, 8dbae9, acd1ff, caebff, e5f9ff, fdffb4, ffe6a2, ffc969, ffa12d, ff7c1f, ca531a, ff0000, ab0000"
-        palette_input = cp1.text_input("Hex Colors (comma separated)", value=default_p)
-        v_min = cp2.number_input("Min Value", value=-300.0 if selected_var in ['tmmx', 'tmmn'] else 0.0)
-        v_max = cp3.number_input("Max Value", value=300.0 if selected_var in ['tmmx', 'tmmn'] else 500.0)
+        palette_input = cp1.text_input("Hex Colors", value=default_p)
+        auto_stretch = cp4.checkbox("Auto-Stretch", value=True)
+        
+        # Determine initial defaults if not auto-stretching
+        v_min_def = -300.0 if selected_var in ['tmmx', 'tmmn'] else 0.0
+        v_max_def = 300.0 if selected_var in ['tmmx', 'tmmn'] else 500.0
+        
+        v_min = cp2.number_input("Min Value", value=v_min_def)
+        v_max = cp3.number_input("Max Value", value=v_max_def)
         
         current_palette = [c.strip() for c in palette_input.split(",")]
 
@@ -146,9 +152,23 @@ if st.session_state.get("ee_initialized"):
         # Processing
         mean_img = dataset.select(selected_var).mean().clip(roi)
         
+        # --- AUTO STRETCH LOGIC ---
+        if auto_stretch:
+            with st.spinner("Calculating regional stats..."):
+                stats = mean_img.reduceRegion(
+                    reducer=ee.Reducer.minMax(),
+                    geometry=roi.geometry(),
+                    scale=5000,
+                    maxPixels=1e9
+                ).getInfo()
+                
+                # Update Min/Max from GEE result
+                v_min = stats.get(f"{selected_var}_min", v_min_def)
+                v_max = stats.get(f"{selected_var}_max", v_max_def)
+        
         # Apply Custom Palette
         vis_params = {'min': v_min, 'max': v_max, 'palette': current_palette}
-        st.info(f"Visualizing `{variables[selected_var]}` with range [{v_min}, {v_max}]")
+        st.info(f"Visualizing `{variables[selected_var]}` with range [{round(v_min, 1)}, {round(v_max, 1)}]")
 
         # --- TABS ---
         tab_map, tab_chart, tab_export = st.tabs(["🗺️ Map Viewer", "📈 Trend Analysis", "💾 Export Map"])
