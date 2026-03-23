@@ -201,17 +201,26 @@ if st.session_state.get("ee_initialized"):
             if st.button("📊 Extract Time Series"):
                 with st.spinner("Processing regional data..."):
                     def extract_info(image):
-                        date = image.date().format('YYYY-MM-DD')
+                        millis = image.date().millis()
                         value = image.reduceRegion(ee.Reducer.mean(), roi, 5000).get(selected_var)
-                        return ee.Feature(None, {'date': date, 'value': value})
+                        return ee.Feature(None, {'millis': millis, 'value': value})
                     
                     data_features = dataset.select(selected_var).map(extract_info).getInfo()['features']
                     df = pd.DataFrame([f['properties'] for f in data_features])
+                    
                     if not df.empty:
-                        df['date'] = pd.to_datetime(df['date'], format='mixed')
+                        # Convert millis to readable dates
+                        df['date'] = pd.to_datetime(df['millis'], unit='ms')
                         df = df.set_index('date').sort_index()
-                        st.line_chart(df['value'])
-                        st.dataframe(df)
+                        
+                        # Remove rows with null values before charting
+                        df = df.dropna(subset=['value'])
+                        
+                        if not df.empty:
+                            st.line_chart(df['value'])
+                            st.dataframe(df[['value']])
+                        else:
+                            st.warning("All values in the selected range were null.")
                     else:
                         st.warning("No data found for this period.")
 
