@@ -173,7 +173,7 @@ if st.session_state.get("ee_initialized"):
                     data_features = dataset.select(selected_var).map(extract_info).getInfo()['features']
                     df = pd.DataFrame([f['properties'] for f in data_features])
                     if not df.empty:
-                        df['date'] = pd.to_datetime(df['date'])
+                        df['date'] = pd.to_datetime(df['date'], format='mixed')
                         df = df.set_index('date').sort_index()
                         st.line_chart(df['value'])
                         st.dataframe(df)
