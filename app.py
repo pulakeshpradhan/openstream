@@ -61,19 +61,26 @@ with st.sidebar:
 
 # --- MAIN PANEL: ANALYSIS ---
 if st.session_state.get("ee_initialized"):
+    # Compact Controls
     with st.container():
-        col1, col2 = st.columns([1, 1])
+        c1, c2, c3, c4 = st.columns([1.2, 1.2, 1.5, 1.2])
         
-        with col1:
-            st.subheader("📅 Timeframe")
-            start_date = st.date_input("Start Date", datetime.now() - timedelta(days=365))
-            end_date = st.date_input("End Date", datetime.now())
-        
-        with col2:
-            st.subheader("📍 Location")
-            lat = st.number_input("Lat", value=28.6, format="%.4f")
-            lon = st.number_input("Lon", value=77.2, format="%.4f")
-            zoom = st.slider("Zoom", 1, 18, 10)
+        with c1:
+            start_date = st.date_input("Start", datetime.now() - timedelta(days=365))
+        with c2:
+            end_date = st.date_input("End", datetime.now())
+        with c3:
+            # Group Lat/Lon in two internal columns for maximum compactness
+            sub_c1, sub_c2 = st.columns(2)
+            lat = sub_c1.number_input("Lat", value=28.6, format="%.2f")
+            lon = sub_c2.number_input("Lon", value=77.2, format="%.2f")
+        with c4:
+            zoom = st.number_input("Zoom", 1, 18, 10)
+
+    # Visualization & Map
+    col_vis, col_info = st.columns([2, 1])
+    with col_vis:
+        vis_mode = st.radio("Visualization Style", ["Natural Color", "False Color", "NDVI"], horizontal=True)
 
     st.markdown("---")
 
